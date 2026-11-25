@@ -33,7 +33,11 @@ tidl_derle.py    model.onnx -> ../model/<ad>/ (artifacts/, model.json, derleme_r
 source ~/iha_calisma/ortam.env
 $IHA_EGITIM_PY veri_hazirla.py --cikti $IHA_CALISMA/veri/coco \
     --kaynak train=/veri/xplane_v4:train --kaynak val=/veri/xplane_v4:valid \
-    --kaynak train=/veri/gercek:train   --kaynak val=/veri/gercek:valid
+    --kaynak "train=/veri/rf_merged:train,esle=bird>negatif;airplane>atla;helicopter>atla;*>iha" \
+    --kaynak "train=/veri/mmfw/zoom,coco=/veri/mmfw/zoom_train.json,her=5" \
+    --haric-oturumlar ../test-seti/oturumlar.txt
+# esle: sınıf -> iha | negatif (kutu silinir, görüntü hedefsiz örnek kalır) | atla (görüntü kullanılmaz)
+# her=N: videodan çıkarılmış ardışık karelerden her N.'yi al; 1920 pikselden büyük kareler küçültülür
 $IHA_EGITIM_PY egit.py --ad nano960 --model nano --genislik 960 --yukseklik 544 \
     --train $IHA_CALISMA/veri/coco/train.json --val $IHA_CALISMA/veri/coco/val.json --epok 60 --batch 16
 $IHA_EGITIM_PY disa_aktar.py --ayar $IHA_CALISMA/egitim/nano960/iha_ayar.py \
