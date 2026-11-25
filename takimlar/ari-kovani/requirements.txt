@@ -1,0 +1,2 @@
+# Ek Python paketleri, sürümleriyle (paket==sürüm). Referans ortamda hazır gelen paketler (numpy, onnxruntime
+# TIDL sağlayıcısı, opencv, PyGObject) yazılmaz. Kartta doğrulanınca güncellenecek.

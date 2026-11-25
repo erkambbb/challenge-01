@@ -1,0 +1,1 @@
+# Sistem paketi gerekmiyor: GStreamer, TI tiovx eklentileri ve ONNX Runtime (TIDL) t3-gem-o1-edgeai ile gelir.
