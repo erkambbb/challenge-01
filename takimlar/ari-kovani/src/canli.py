@@ -5,7 +5,7 @@ Kamera karesi -> (ISP/ölçekleme donanımda) -> YOLOX-lite INT8 (C7x/MMA, TIDL)
 H.264 donanım kodlayıcı -> RTP/UDP (ya da dosya / ekran).
 
 Örnekler (kartta, root ve 'source /opt/t3-edgeai-env' sonrası):
-    python3 src/canli.py --kaynak imx219:0 --cikis udp://192.168.7.1:5000
+    python3 src/canli.py --kaynak imx477:0 --gamma 2.2 --cikis udp://192.168.7.1:5000
     python3 src/canli.py --kaynak /dev/video2 --cikis kayit.mp4
     python3 src/canli.py --kaynak ucus.mp4 --cikis ekran --mod cpu      # bilgisayarda deneme
 
@@ -92,13 +92,16 @@ class SiraliOkuyucu:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--kaynak", default="imx219:0")
+    ap.add_argument("--kaynak", default="imx477:0", help="imx477[:N] | imx219[:N] | /dev/videoN | gst:<hat> | video dosyası")
     ap.add_argument("--model", default=str(VARSAYILAN_MODEL))
     ap.add_argument("--mod", default="otomatik", choices=["otomatik", "tidl", "cpu"])
     ap.add_argument("--cikis", default="", help="udp://HOST:PORT | dosya.mp4 | ekran | boş (çıkış yok)")
     ap.add_argument("--genislik", type=int, default=1280)
     ap.add_argument("--yukseklik", type=int, default=720)
-    ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--fps", type=int, default=None, help="kamera kare hızı (varsayılan sensöre göre; imx477 50)")
+    ap.add_argument("--gamma", type=float, default=1.0,
+                    help="kareye gamma düzeltmesi (IMX477 ISP ayarı karanlık; 2.2 önerilir)")
+    ap.add_argument("--isp-ek", default="", help="tiovxisp ek ayarları, ör. \"sink_0::awb-mode=0\"")
     ap.add_argument("--esik", type=float, default=None, help="izlenecek en düşük tespit skoru")
     ap.add_argument("--sure", type=float, default=0, help="saniye; 0 = Ctrl+C'ye kadar")
     ap.add_argument("--iz-kaydi", default="", help="izleri JSON Lines olarak yaz")
@@ -111,7 +114,7 @@ def main() -> int:
     esik = args.esik if args.esik is not None else float(meta.get("canli_esik", 0.3))
     algilayici = Algilayici(args.model, mod=args.mod, esik=min(0.1, esik))
     takipci = Takipci(yuksek_esik=esik, dusuk_esik=min(0.1, esik), yeni_iz_esigi=max(esik, 0.4))
-    kaynak = kaynak_ac(args.kaynak, args.genislik, args.yukseklik, args.fps)
+    kaynak = kaynak_ac(args.kaynak, args.genislik, args.yukseklik, args.fps, args.gamma, args.isp_ek)
     dosya = getattr(kaynak, "dosya", False)
     if dosya and not args.gercek_zaman:
         okuyucu = SiraliOkuyucu(kaynak)  # video dosyası: her kare sırayla işlenir
@@ -158,7 +161,7 @@ def main() -> int:
                      f"IHA: {len(izler)}"]
             durum_ciz(kare, durum)
             if cikis is None:
-                cikis = Cikis(args.cikis, w, h, fps=args.fps)
+                cikis = Cikis(args.cikis, w, h, fps=args.fps or 30)
             cikis.yaz(kare)
 
         if iz_dosyasi:

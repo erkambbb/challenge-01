@@ -1,8 +1,9 @@
 """Görüntü kaynakları ve çıkış akışı.
 
 Kaynak biçimleri:
-    imx219[:0|1]        CSI kamera, donanım ISP'si (VPAC VISS) + ölçekleyici (MSC) + renk dönüşümü GStreamer'da.
-                        Kartta gem-camera-setup çıktısındaki aygıt adları kullanılır.
+    imx477[:0|1]        CSI kamera (Raspberry Pi HQ Camera; imx219, imx230, ov5647 de olur). Donanım ISP'si
+                        (VPAC VISS) + ölçekleyici (MSC) + renk dönüşümü GStreamer'da. Aygıt adları
+                        'camera-isp-sdk setup' (imx219 için gem-camera-setup) çıktısındakilerdir.
     /dev/videoN | N     V4L2 / USB kamera (OpenCV)
     gst:<boru hattı>    appsink ile biten herhangi bir GStreamer boru hattı (BGR ya da RGB çıkış)
     dosya.mp4 / .avi    video dosyası (OpenCV)
@@ -32,22 +33,49 @@ except Exception:  # GStreamer Python bağları yoksa yalnız OpenCV kaynakları
     Gst = None
 
 
-def imx219_boru_hatti(kamera_no: int = 0, genislik: int = 1280, yukseklik: int = 720, fps: int = 30) -> str:
-    """IMX219 için TI donanım hattı: v4l2src (bayer) -> tiovxisp -> tiovxmultiscaler -> tiovxdlcolorconvert.
+# Sensör -> (tiovxisp sensor-name, bayer biçimi, format-msb, kare hızı).
+# imx219: TI'nin kendi yolu (object-tracker-o1 / edgeai-gst-apps). Diğerleri: T3 Kamera ISP SDK tanımlayıcıları
+# (t3gemstone/camera-isp-sdk, sensors/<id>/sensor.conf); bu yol için kartta camera-isp-sdk paketi kurulu ve
+# tiovx eklentisi yamalı olmalıdır.
+SENSORLER = {
+    "imx219": ("SENSOR_SONY_IMX219_RPI", "rggb", 7, 30),
+    "imx477": ("imx477", "rggb12", 11, 50),   # Raspberry Pi HQ Camera, 1920x1080 RAW12
+    "imx230": ("imx230", "rggb10", 9, 30),
+    "ov5647": ("ov5647", "bggr10", 9, 30),
+}
 
-    Kaynak: t3gemstone/object-tracker-o1 (TI edgeai-gst-apps) içindeki boru hattı kurulumu.
+
+def sensor_boru_hatti(sensor: str = "imx477", kamera_no: int = 0, genislik: int = 1280, yukseklik: int = 720,
+                      fps: int | None = None, isp_ek: str = "") -> str:
+    """CSI kamera için donanım hattı: v4l2src (bayer) -> tiovxisp (VPAC VISS + 2A) -> tiovxmultiscaler (MSC)
+    -> tiovxdlcolorconvert -> RGB. Görüntü işleme ve ölçekleme donanımda yapılır; A53 yalnız 2A'yı çalıştırır.
+
+    isp_ek: tiovxisp'e eklenecek ayarlar, ör. "sink_0::awb-mode=0" (IMX477'de AE ve AWB birlikte açıkken görüntü
+    kararıyor; bkz. camera-isp-sdk/sensors/imx477/README.md).
     """
-    aygit = f"/dev/video-imx219-cam{kamera_no}"
-    alt_aygit = f"/dev/v4l-imx219-subdev{kamera_no}"
-    dcc = "/opt/imaging/imx219/linear"
+    ad, bicim, msb, varsayilan_fps = SENSORLER[sensor]
+    fps = fps or varsayilan_fps
+    aygit = f"/dev/video-{sensor}-cam{kamera_no}"
+    alt_aygit = f"/dev/v4l-{sensor}-subdev{kamera_no}"
+    dcc = f"/opt/imaging/{sensor}/linear"
     return (
-        f"v4l2src device={aygit} io-mode=5 ! queue leaky=2 ! "
-        f"video/x-bayer,width=1920,height=1080,format=rggb,framerate={fps}/1 ! "
-        f"tiovxisp sensor-name=SENSOR_SONY_IMX219_RPI dcc-isp-file={dcc}/dcc_viss.bin format-msb=7 "
-        f"sink_0::dcc-2a-file={dcc}/dcc_2a.bin sink_0::device={alt_aygit} ! video/x-raw,format=NV12 ! "
+        f"v4l2src device={aygit} io-mode=dmabuf-import ! queue leaky=2 ! "
+        f"video/x-bayer,width=1920,height=1080,format={bicim},framerate={fps}/1 ! "
+        f"tiovxisp sensor-name={ad} dcc-isp-file={dcc}/dcc_viss.bin format-msb={msb} "
+        f"sink_0::dcc-2a-file={dcc}/dcc_2a.bin sink_0::device={alt_aygit} {isp_ek} ! video/x-raw,format=NV12 ! "
         f"tiovxmultiscaler ! video/x-raw,format=NV12,width={genislik},height={yukseklik} ! "
         f"tiovxdlcolorconvert ! video/x-raw,format=RGB"
     )
+
+
+def imx219_boru_hatti(kamera_no: int = 0, genislik: int = 1280, yukseklik: int = 720, fps: int = 30) -> str:
+    return sensor_boru_hatti("imx219", kamera_no, genislik, yukseklik, fps)
+
+
+def gamma_tablosu(gamma: float) -> np.ndarray:
+    """Çıkış = 255 * (giriş/255)^(1/gamma). gamma > 1 karanlık görüntüyü aydınlatır."""
+    x = np.arange(256, dtype=np.float32) / 255.0
+    return np.clip(np.round(255.0 * x ** (1.0 / gamma)), 0, 255).astype(np.uint8)
 
 
 class GstKaynak:
@@ -100,10 +128,36 @@ class CvKaynak:
         self.cap.release()
 
 
-def kaynak_ac(kaynak: str, genislik: int = 1280, yukseklik: int = 720, fps: int = 30):
-    if kaynak.startswith("imx219"):
+class GammaKaynak:
+    """Başka bir kaynağın karelerine gamma düzeltmesi uygular (cv2.LUT, 1280x720'de ~1-2 ms)."""
+
+    def __init__(self, kaynak, gamma: float):
+        self.kaynak = kaynak
+        self.tablo = gamma_tablosu(gamma)
+        self.dosya = getattr(kaynak, "dosya", False)
+        self.fps = getattr(kaynak, "fps", None)
+
+    def oku(self):
+        ok, kare = self.kaynak.oku()
+        if ok:
+            kare = cv2.LUT(kare, self.tablo)
+        return ok, kare
+
+    def kapat(self):
+        self.kaynak.kapat()
+
+
+def kaynak_ac(kaynak: str, genislik: int = 1280, yukseklik: int = 720, fps: int | None = None,
+              gamma: float = 1.0, isp_ek: str = ""):
+    k = _kaynak_ac(kaynak, genislik, yukseklik, fps, isp_ek)
+    return GammaKaynak(k, gamma) if gamma and abs(gamma - 1.0) > 1e-3 else k
+
+
+def _kaynak_ac(kaynak: str, genislik: int, yukseklik: int, fps: int | None, isp_ek: str):
+    sensor = kaynak.split(":")[0]
+    if sensor in SENSORLER:
         no = int(kaynak.split(":")[1]) if ":" in kaynak else 0
-        return GstKaynak(imx219_boru_hatti(no, genislik, yukseklik, fps))
+        return GstKaynak(sensor_boru_hatti(sensor, no, genislik, yukseklik, fps, isp_ek))
     if kaynak.startswith("gst:"):
         return GstKaynak(kaynak[4:])
     if kaynak.isdigit():

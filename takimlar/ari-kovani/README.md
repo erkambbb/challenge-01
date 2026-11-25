@@ -14,18 +14,18 @@ Neden kart üzerinde (uçta)?
 - **Bağlantı:** Uçuş sırasında güvenilir ve yüksek bant genişlikli bir bağlantı yoktur.
 - **Güç ve ağırlık:** İHA'ya ayrı bir bilgisayar ya da harici hızlandırıcı taşımak yerine, 4 TOPS'luk C7x/MMA hızlandırıcısı olan tek bir kart yeterli olmalıdır.
 
-Zorluk: Uzaktaki bir İHA karede yalnızca birkaç piksel kaplar (ör. 2 m kanat açıklıklı bir İHA 300 m'de, 62° yatay görüş açılı 1280 piksellik bir karede yaklaşık 8 piksel). Bu yüzden giriş çözünürlüğü, küçük hedef performansı ve takip, model seçiminin merkezindedir.
+Zorluk: Uzaktaki bir İHA karede yalnızca birkaç piksel kaplar. Kameramızda (IMX477, 12 mm lens, 1920×1080 modunda yatay görüş açısı ≈28°) 2 m kanat açıklıklı bir İHA 300 m'de yaklaşık 26 piksel, modele giren 960 piksellik karede ≈13 piksel genişliğindedir. Bu yüzden giriş çözünürlüğü, küçük hedef performansı ve takip, model seçiminin merkezindedir.
 
 ## Donanım düzeneği
 
 - **Kart:** T3 Gemstone O1 (TI AM67A: 4× Cortex-A53, 2× C7x DSP + MMA = 4 TOPS INT8), aktif soğutucu.
-- **Kamera:** MIPI CSI kamera (CSI0 konnektörü). Görüntü, kartın donanım ISP'sinden (VPAC VISS) ve ölçekleyicisinden (MSC) geçer; renk dönüşümü de donanımda yapılır. Kamera modeli ve bağlantı fotoğrafı kart testinden sonra eklenecek.
+- **Kamera:** Raspberry Pi HQ Camera (Sony IMX477R, 12,3 MP), 12 mm lens, MIPI CSI-2 (CSI0 konnektörü). 1920×1080 RAW12 modunda 50 fps; yatay görüş açısı ≈28°, dikey ≈16°. Sürücü ve ISP tanımlayıcısı T3 Kamera ISP SDK'dan (`t3gemstone/camera-isp-sdk`). Görüntü kartın donanım ISP'sinden (VPAC VISS), ölçekleyicisinden (MSC) ve renk dönüştürücüsünden geçer. ISP ayarı henüz kaba olduğundan (çıkış karanlık) A53'te 2.2 gamma düzeltmesi uygulanır (256 girişli tablo, ~1-2 ms). Bağlantı fotoğrafı kart testinden sonra eklenecek.
 - **Çıkış:** İşlenmiş görüntü kartın donanım H.264 kodlayıcısıyla sıkıştırılıp RTP/UDP ile yer bilgisayarına aktarılır; izlerin konumu terminale ve isteğe göre JSON Lines dosyasına yazılır.
 
 Veri akışı ve donanım ayrımı:
 
 ```
-CSI kamera ──> VPAC ISP (VISS) ──> MSC ölçekleyici ──> renk dönüşümü ──> A53: letterbox (önişlem)
+IMX477 (CSI) ──> VPAC ISP (VISS) ──> MSC ölçekleyici ──> renk dönüşümü ──> A53: gamma + letterbox (önişlem)
                                                                               │
           C7x/MMA (TIDL, INT8): YOLOX-lite omurga + boyun + başlık + kutu çözme + NMS
                                                                               │
@@ -46,9 +46,16 @@ sudo su
 source /opt/t3-edgeai-env
 pip3 install -r takimlar/ari-kovani/requirements.txt
 
+# Kamera (yalnız canlı uygulama için; test-seti değerlendirmesi kamerasız çalışır):
+# T3 Kamera ISP SDK paketi (IMX477 sürücüsü + ISP ayarı + overlay) kurulur, tiovx eklentisi bir kez yamalanır
+sudo tar -C / -xzf camera-isp-sdk-*-t3-gem-o1.tar.gz && sudo depmod -a
+/usr/share/camera-isp-sdk/gst/build.sh
+# /boot/uEnv.txt -> overlays= satırına k3-am67a-t3-gem-o1-csi0-imx477.dtbo ekle, reboot; her açılışta:
+camera-isp-sdk setup imx477
+
 # Uygulamayı çalıştırma (canlı kamera, akış yer bilgisayarına)
 cd takimlar/ari-kovani
-python3 src/canli.py --kaynak imx219:0 --cikis udp://192.168.7.1:5000
+python3 src/canli.py --kaynak imx477:0 --gamma 2.2 --cikis udp://192.168.7.1:5000
 # Yer bilgisayarında izlemek için:
 #   gst-launch-1.0 udpsrc port=5000 caps="application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000" \
 #     ! rtpjitterbuffer latency=0 ! rtph264depay ! avdec_h264 ! autovideosink sync=false
@@ -108,7 +115,7 @@ Claude Code (Anthropic): kod yazımı, derleme ve eğitim betiklerinin hazırlan
 
 - **Takım:** Arı Kovanı
 - **Takım Kaptanı:** erkambbb
-- **Üyeler:** erkambbb (diğer üyelerin GitHub kullanıcı adları eklenecek)
+- **Üyeler:** erkambbb, YusufMuharremDaskaya, 05Arda
 - **Danışman:** belirtilecek
 - **Lisans:** Bu repodaki çalışmalar referans repodaki lisans koşullarına tabidir; [LICENSE](LICENSE) dosyasına bakın.
 - **Üçüncü taraf model, veri seti ve kütüphaneler:**
@@ -116,7 +123,7 @@ Claude Code (Anthropic): kod yazımı, derleme ve eğitim betiklerinin hazırlan
   - edgeai-modeloptimization (torchmodelopt) ve edgeai-mmdeploy: Texas Instruments, BSD-3-Clause. Yalnız eğitim/dışa aktarma aracı olarak kullanılır, repoya kopyalanmamıştır.
   - edgeai-tidl-tools 11_00_06_00 (TIDL derleyicisi ve ONNX Runtime TIDL sağlayıcısı): Texas Instruments, TI Text File License. Derlenmiş TIDL dosyaları bu araçla üretilmiştir.
   - ONNX Runtime (MIT), OpenCV (Apache-2.0), NumPy (BSD-3-Clause), GStreamer (LGPL-2.1, kartın sistem paketi).
-  - IMX219 donanım boru hattı ayarları: t3gemstone/object-tracker-o1 ve TI edgeai-gst-apps (TI Text File License) referans alınarak yazılmıştır.
+  - Kamera boru hattı: t3gemstone/camera-isp-sdk (Apache-2.0; IMX477 sürücüsü GPL-2.0, Raspberry Pi çekirdeğinden) ve t3gemstone/object-tracker-o1 / TI edgeai-gst-apps (TI Text File License) referans alınarak yazılmıştır. Sürücü ve ISP paketi kartın sistemine kurulur, repoya kopyalanmamıştır.
   - Takip yöntemi ByteTrack'in iki aşamalı eşleştirme fikrine dayanır (Zhang ve ark., "ByteTrack: Multi-Object Tracking by Associating Every Detection Box", ECCV 2022); kod takım tarafından yazılmıştır.
   - COCO veri seti (TI'nin ön eğitiminde kullanıldı): etiketler CC BY 4.0.
   - Eğitim verisi: X-Plane (Laminar Research) ile takım tarafından üretilen sentetik görüntüler; diğer kaynaklar ve lisansları eklenecek.
