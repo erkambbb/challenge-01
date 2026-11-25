@@ -18,25 +18,29 @@ declare -A AGIRLIK=(
   [s]=yolox_s_lite_640x640_20220221_checkpoint.pth
 )
 
-# model genislik yukseklik cikarim_modu cekirdek karisik(1/0)
+# model genislik yukseklik cikarim_modu cekirdek karisik(1/0) giris(f32/u8)
 VARYANTLAR=(
-  "nano 416 416 0 1 1"
-  "nano 640 640 0 1 1"
-  "nano 960 544 0 1 1"
-  "nano 960 544 0 1 0"
-  "nano 960 544 2 2 1"
-  "nano 1280 736 0 1 1"
-  "tiny 640 640 0 1 1"
-  "tiny 960 544 0 1 1"
-  "tiny 960 544 2 2 1"
-  "s 640 640 0 1 1"
-  "s 960 544 0 1 1"
-  "s 960 544 2 2 1"
+  "nano 416 416 0 1 1 f32"
+  "nano 640 640 0 1 1 f32"
+  "nano 960 544 0 1 1 f32"
+  "nano 960 544 0 1 0 f32"
+  "nano 960 544 2 2 1 f32"
+  "nano 1280 736 0 1 1 f32"
+  "tiny 640 640 0 1 1 f32"
+  "tiny 960 544 0 1 1 f32"
+  "tiny 960 544 2 2 1 f32"
+  "s 640 640 0 1 1 f32"
+  "s 960 544 0 1 1 f32"
+  "s 960 544 2 2 1 f32"
+  "nano 960 544 0 1 1 u8"
+  "nano 960 544 2 2 1 u8"
+  "tiny 960 544 0 1 1 u8"
+  "nano 1280 736 0 1 1 u8"
 )
 
 for v in "${VARYANTLAR[@]}"; do
-  read -r M W H IM C K <<<"$v"
-  AD="coco_${M}_${W}x${H}_im${IM}$([ "$K" = 1 ] && echo _k16 || echo _int8)"
+  read -r M W H IM C K G <<<"$v"
+  AD="coco_${M}_${W}x${H}_im${IM}$([ "$K" = 1 ] && echo _k16 || echo _int8)$([ "$G" = u8 ] && echo _u8 || true)"
   if [ -f "$CIKTI/$AD/model.json" ]; then echo "var: $AD"; continue; fi
   E="$DISA/${M}_${W}x${H}"
   if [ ! -f "$E/model.onnx" ]; then
@@ -46,6 +50,7 @@ for v in "${VARYANTLAR[@]}"; do
   fi
   EK=()
   [ "$K" = 0 ] && EK+=(--karisik-hassasiyet-kapali)
+  [ "$G" = f32 ] && EK+=(--float-giris)
   "$IHA_TIDL_PY" "$BURASI/tidl_derle.py" --onnx "$E/model.onnx" --prototxt "$E/model.prototxt" \
     --kalibrasyon "$KALIB" --adet 6 --iterasyon 2 --cikti "$CIKTI/$AD" --ad "$AD" --siniflar coco \
     --cikarim-modu "$IM" --cekirdek-sayisi "$C" "${EK[@]}" > "$CIKTI/$AD.log" 2>&1 \

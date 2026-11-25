@@ -104,6 +104,8 @@ class Algilayici:
             self.oturum = ort.InferenceSession(str(self.bilgi.onnx), providers=["CPUExecutionProvider"],
                                                sess_options=so)
         self.giris_adi = self.oturum.get_inputs()[0].name
+        # uint8 girişli modelde (tidl_derle.py --uint8-giris) float dönüşümü grafın içinde, C7x'te yapılır
+        self.uint8_giris = self.oturum.get_inputs()[0].type == "tensor(uint8)"
         self.cikis_adlari = [o.name for o in self.oturum.get_outputs()]
         self.son_sureler = {}
 
@@ -133,7 +135,10 @@ class Algilayici:
         t0 = time.perf_counter()
         b = self.bilgi
         tuval, r = letterbox(bgr, b.genislik, b.yukseklik, b.dolgu)
-        x = tensore_cevir(tuval, b.ortalama, b.olcek)
+        if self.uint8_giris:
+            x = np.ascontiguousarray(tuval.transpose(2, 0, 1)[None])
+        else:
+            x = tensore_cevir(tuval, b.ortalama, b.olcek)
         t1 = time.perf_counter()
         cikti = self.oturum.run(None, {self.giris_adi: x})
         t2 = time.perf_counter()

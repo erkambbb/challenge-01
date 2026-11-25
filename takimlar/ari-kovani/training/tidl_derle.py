@@ -62,9 +62,9 @@ def karisik_hassasiyet_katmanlari(onnx_yolu: Path, prototxt: str) -> list[str]:
     m = onnx.load(str(onnx_yolu))
     uretici = {o: n for n in m.graph.node for o in n.output}
     adlar = []
-    giris = m.graph.input[0].name
+    # ONNX düğümleri topolojik sıralıdır: ilk Conv, girişe (gerekirse uint8->float Cast üzerinden) bağlı olandır
     for n in m.graph.node:
-        if n.op_type == "Conv" and n.input[0] == giris:
+        if n.op_type == "Conv":
             adlar.append(n.output[0])
             break
     for ad in re.findall(r'input:\s*"([^"]+)"', prototxt):
@@ -76,6 +76,24 @@ def karisik_hassasiyet_katmanlari(onnx_yolu: Path, prototxt: str) -> list[str]:
         elif dugum.op_type == "Conv":
             adlar.append(ad)
     return adlar
+
+
+def uint8_girise_cevir(onnx_yolu: Path) -> None:
+    """Model girişini uint8 yapar; float32 dönüşümü (Cast) grafın içine, dolayısıyla C7x'e taşınır.
+
+    Böylece A53 her karede 4 kat büyük float32 tensör üretmek yerine uint8 kareyi doğrudan verir.
+    """
+    import onnx
+    from onnx import TensorProto, helper
+
+    m = onnx.load(str(onnx_yolu))
+    giris = m.graph.input[0]
+    eski = giris.name
+    giris.name = eski + "_u8"
+    giris.type.tensor_type.elem_type = TensorProto.UINT8
+    m.graph.node.insert(0, helper.make_node("Cast", [giris.name], [eski], to=TensorProto.FLOAT, name="giris_u8_float"))
+    onnx.checker.check_model(m)
+    onnx.save(m, str(onnx_yolu))
 
 
 def kalibrasyon_listesi(kaynaklar: list[str], adet: int, tohum: int) -> list[Path]:
@@ -108,10 +126,12 @@ def _derle_alt(ayar_yolu: str) -> int:
                                 provider_options=[secenekler, {}], sess_options=ort.SessionOptions())
     giris = sess.get_inputs()[0]
     _, _, h, w = giris.shape
+    uint8 = giris.type == "tensor(uint8)"
     for yol in a["kalibrasyon"]:
         kare = cv2.imread(yol)
         tuval, _ = letterbox(kare, w, h, 114)
-        sess.run(None, {giris.name: tensore_cevir(tuval)})
+        x = tensore_cevir(tuval)
+        sess.run(None, {giris.name: x.astype(np.uint8) if uint8 else x})
     del sess
     return 0
 
@@ -173,11 +193,14 @@ def main():
     ap.add_argument("--siniflar", default="iha")
     ap.add_argument("--bit", type=int, default=8, choices=[8, 16])
     ap.add_argument("--dogruluk-seviyesi", type=int, default=1, choices=[0, 1, 9])
-    ap.add_argument("--niceleme-turu", type=int, default=0, choices=[0, 1, 4],
+    ap.add_argument("--niceleme-turu", type=int, default=4, choices=[0, 1, 4],
                     help="quantization_scale_type: 0 simetrik 2'nin kuvveti olmayan ölçek, 1 2'nin kuvveti, "
-                         "4 asimetrik kanal başına (TI'nin AM67A için önerisi)")
+                         "4 asimetrik kanal başına (TI'nin AM67A için önerisi; varsayılan)")
     ap.add_argument("--otomatik-karisik", type=float, default=-1,
                     help="mixed_precision_factor: >1 ise TIDL 16 bit katmanları kendisi seçer (ör. 1.2 = %%20 ek süre payı)")
+    ap.add_argument("--uint8-giris", action="store_true", default=True,
+                    help="ONNX girişini uint8 yap (float dönüşümü C7x'te); A53 önişlem yükünü azaltır (varsayılan)")
+    ap.add_argument("--float-giris", dest="uint8_giris", action="store_false")
     ap.add_argument("--karisik-hassasiyet", action="store_true", default=True)
     ap.add_argument("--karisik-hassasiyet-kapali", dest="karisik_hassasiyet", action="store_false")
     ap.add_argument("--cikarim-modu", type=int, default=0, choices=[0, 1, 2],
@@ -210,6 +233,8 @@ def main():
     (cikti / "model.prototxt").write_text(proto)
 
     import onnx
+    if args.uint8_giris:
+        uint8_girise_cevir(cikti / "model.onnx")
     m = onnx.load(str(cikti / "model.onnx"))
     _, _, h, w = [d.dim_value for d in m.graph.input[0].type.tensor_type.shape.dim]
     del m
@@ -283,6 +308,7 @@ def main():
             "tensor_bits": args.bit,
             "accuracy_level": args.dogruluk_seviyesi,
             "quantization_scale_type": args.niceleme_turu,
+            "uint8_giris": args.uint8_giris,
             "mixed_precision_factor": args.otomatik_karisik,
             "kalibrasyon_kare": len(kalib),
             "kalibrasyon_iterasyon": args.iterasyon,

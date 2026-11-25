@@ -59,6 +59,24 @@ TIDL_TOOLS_PATH=... $IHA_TIDL_PY ../src/degerlendir.py --test-seti ../test-seti 
 - `varyant_derle.sh`: model seçimi için farklı boyut / çözünürlük / çekirdek modlarında hız ölçüm varyantları derler; kartta `src/hiz_olc.py` ile ölçülür.
 - `configs/deploy_onnx_static.py`: dışa aktarma ayarı; ONNX içindeki son işlem eşikleri TIDL prototxt'iyle aynı tutulur ki CPU float32 ve TIDL INT8 sonuçları karşılaştırılabilsin.
 
+## Niceleme deneyi (duman testi, 25 Kasım 2026)
+
+Aynı ağırlık (YOLOX-nano-lite 960×544, sentetik duman verisiyle 12 epok), 150 sentetik doğrulama görüntüsü, TIDL PC emülasyonu (kartla bit düzeyinde aynı INT8 hesap). Kalibrasyon: 50 kare × 10 yineleme, accuracy_level 1.
+
+| Derleme | AP@0.5 | AP@[.5:.95] | Hassasiyet @0,35 | Boş karede yanlış alarm |
+|---|---|---|---|---|
+| CPU float32 (referans) | 0,8507 | 0,6437 | 0,988 | 0 |
+| INT8, simetrik | 0,8430 | 0,4741 | 0,884 | 0,07 |
+| INT8 + 16 bit ilk konvolüsyon ve algılama başlıkları | 0,8489 | 0,6039 | 0,977 | 0 |
+| **+ asimetrik kanal başına niceleme (`quantization_scale_type=4`)** | **0,8506** | **0,6194** | **0,988** | **0** |
+| Tamamen 16 bit | 0,8507 | 0,6416 | 0,988 | 0 |
+
+Çıkarımlar:
+- Algılama başlığının (kutu regresyonu) 16 bit tutulması, sıkı IoU'larda kayıp olan konumlandırma doğruluğunu geri getiriyor (AP@[.5:.95]: 0,474 -> 0,604).
+- Asimetrik kanal başına niceleme ile INT8 modelin AP@0.5'i float32 ile aynı (fark 0,0001). `tidl_derle.py`'ın varsayılanları bu ayarlardır.
+- Daha az kalibrasyonla (20 kare × 5 yineleme) aynı ağda 7,5 puanlık AP@0.5 kaybı görülmüştü; kalibrasyon kare sayısı önemlidir.
+- Tamamen 16 bit, float32'yi en yakından izliyor ama daha yavaş olması bekleniyor. INT8 + karışık hassasiyet ile arasındaki seçim kartta ölçülen gecikmeye göre yapılacak (varyantlar: `duman_nano960_{sym,asym}_k16_f32`, `duman_nano960_sym_int8_f32`, `duman_nano960_b16_f32`).
+
 ## Eğitim ayrıntıları
 
 - Başlangıç: TI edgeai-modelzoo YOLOX-lite COCO ağırlıkları. "lite" dönüşümü (SiLU -> ReLU vb.) eğitimden önce uygulanır, ağırlıklar ondan sonra yüklenir; böylece eğitilen ağ derlenen ağla birebir aynıdır.

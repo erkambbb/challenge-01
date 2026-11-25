@@ -90,12 +90,7 @@ optim_wrapper = dict(
     type='{optim}',
     optimizer=dict(type='SGD', lr=base_lr, momentum=0.9, weight_decay=5e-4, nesterov=True),
     paramwise_cfg=dict(norm_decay_mult=0., bias_decay_mult=0.))
-param_scheduler = [
-    dict(type='mmdet.QuadraticWarmupLR', by_epoch=True, begin=0, end={isinma}, convert_to_iter_based=True),
-    dict(type='CosineAnnealingLR', eta_min=base_lr * 0.05, begin={isinma}, T_max=max_epochs - num_last_epochs,
-         end=max_epochs - num_last_epochs, by_epoch=True, convert_to_iter_based=True),
-    dict(type='ConstantLR', by_epoch=True, factor=1, begin=max_epochs - num_last_epochs, end=max_epochs),
-]
+{zamanlayici}
 default_hooks = dict(
     checkpoint=dict(interval={val_aralik}, max_keep_ckpts=2, save_best='coco/bbox_mAP_50', rule='greater'),
     logger=dict(interval=50))
@@ -107,6 +102,20 @@ custom_hooks = [
 load_from = '{baslangic}'
 randomness = dict(seed={tohum})
 '''
+
+
+ZAMANLAYICI_NORMAL = '''param_scheduler = [
+    dict(type='mmdet.QuadraticWarmupLR', by_epoch=True, begin=0, end={isinma}, convert_to_iter_based=True),
+    dict(type='CosineAnnealingLR', eta_min=base_lr * 0.05, begin={isinma}, T_max=max_epochs - num_last_epochs,
+         end=max_epochs - num_last_epochs, by_epoch=True, convert_to_iter_based=True),
+    dict(type='ConstantLR', by_epoch=True, factor=1, begin=max_epochs - num_last_epochs, end=max_epochs),
+]'''
+
+# QAT: ısınma yok, mozaik yok (tüm epoklar "son epok" modunda), düşük öğrenme oranıyla kosinüs
+ZAMANLAYICI_QAT = '''param_scheduler = [
+    dict(type='CosineAnnealingLR', eta_min=base_lr * 0.05, begin=0, T_max=max_epochs, end=max_epochs,
+         by_epoch=True, convert_to_iter_based=True),
+]'''
 
 
 def coco_sinifindan_baslat(kaynak: Path, hedef: Path, sinif: int) -> None:
@@ -161,15 +170,21 @@ def main():
     calisma = Path(os.environ["IHA_CALISMA"]).resolve()
     is_klasoru = calisma / "egitim" / args.ad
     is_klasoru.mkdir(parents=True, exist_ok=True)
-    baslangic = args.baslangic or str(calisma / "modelzoo" / AGIRLIKLAR[args.model])
+    # train.py TI_MMDET klasöründe çalıştığı için yollar mutlak olmalı
+    baslangic = str(Path(args.baslangic).resolve()) if args.baslangic else str(calisma / "modelzoo" / AGIRLIKLAR[args.model])
     if args.baslangic is None and args.coco_sinifi >= 0 and not args.yalniz_ayar:
         hedef = is_klasoru / f"baslangic_coco{args.coco_sinifi}.pth"
         coco_sinifindan_baslat(Path(baslangic), hedef, args.coco_sinifi)
         baslangic = str(hedef)
-    lr =args.lr if args.lr is not None else 0.01 * args.batch / 64
-    son_epok = max(2, min(15, args.epok // 5))
+    lr = args.lr if args.lr is not None else 0.01 * args.batch / 64
     if args.qat:
-        son_epok = args.epok  # QAT'te mozaik kapalı, düz veriyle ince ayar
+        # QAT: mozaik kapalı (tüm epoklar düz veri), ısınma yok, öğrenme oranı 10 kat düşük
+        son_epok = args.epok
+        lr *= 0.1
+        zamanlayici = ZAMANLAYICI_QAT
+    else:
+        son_epok = max(2, min(15, args.epok // 5))
+        zamanlayici = ZAMANLAYICI_NORMAL.format(isinma=min(3, max(1, args.epok // 10)))
     # çok ölçekli eğitim aralığı yükseklik üzerinden (en-boy oranı korunur), 32'nin katı
     rmin = max(32, int(args.yukseklik * 0.75) // 32 * 32)
     rmax = int(args.yukseklik * 1.25) // 32 * 32
@@ -179,12 +194,7 @@ def main():
         val_batch=args.val_batch, isci=args.isci, train=Path(args.train).resolve(), val=Path(args.val).resolve(),
         epok=args.epok, son_epok=son_epok, lr=lr, val_aralik=args.val_aralik,
         optim="AmpOptimWrapper" if args.amp and not args.qat else "OptimWrapper",
-        isinma=min(3, max(1, args.epok // 10)) if not args.qat else 0, baslangic=baslangic, tohum=args.tohum)
-    if args.qat:
-        # QAT: düşük öğrenme oranı, ısınma yok
-        ayar = ayar.replace(f"base_lr = {lr}", f"base_lr = {lr * 0.1}")
-        ayar = ayar.replace("    dict(type='mmdet.QuadraticWarmupLR', by_epoch=True, begin=0, end=0, "
-                            "convert_to_iter_based=True),\n", "")
+        zamanlayici=zamanlayici, baslangic=baslangic, tohum=args.tohum)
     ayar_yolu = is_klasoru / "iha_ayar.py"
     ayar_yolu.write_text(ayar, encoding="utf-8")
     print(f"yapılandırma: {ayar_yolu}")

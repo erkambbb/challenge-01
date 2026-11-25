@@ -1,0 +1,77 @@
+{
+  "ad": "iha_yolox_nano_lite_960x544_duman",
+  "onnx": "model.onnx",
+  "artifacts": "artifacts",
+  "giris": {
+    "genislik": 960,
+    "yukseklik": 544,
+    "dolgu": 114,
+    "kanal_sirasi": "BGR",
+    "yerlesim": "NCHW",
+    "ortalama": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "olcek": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "siniflar": [
+    "iha"
+  ],
+  "degerlendirme_esigi": 0.05,
+  "canli_esik": 0.35,
+  "derleme": {
+    "edgeai_tidl_tools": "11_00_06_00",
+    "tidl_tools_version_txt": "SOC=am67a a20dedb0e7fb135488cefe346f51c1da7d793147",
+    "hedef": "AM67A (J722S)",
+    "tensor_bits": 8,
+    "accuracy_level": 1,
+    "quantization_scale_type": 4,
+    "uint8_giris": true,
+    "mixed_precision_factor": -1,
+    "kalibrasyon_kare": 50,
+    "kalibrasyon_iterasyon": 10,
+    "karisik_hassasiyet_16bit_tensorler": [
+      "1",
+      "165",
+      "166",
+      "164",
+      "179",
+      "180",
+      "178",
+      "192",
+      "193",
+      "191"
+    ],
+    "inference_mode": 0,
+    "num_cores": 1,
+    "prototxt": {
+      "guven_esigi": 0.05,
+      "nms": 0.45,
+      "en_fazla_kutu": 100
+    },
+    "sure_sn": 1006.5
+  },
+  "hizlandirici": {
+    "toplam_dugum": 270,
+    "c7x_dugum": 270,
+    "cpu_dugum": 0,
+    "alt_graf": 1,
+    "katman_turleri": {
+      "TIDL_DataLayer": 3,
+      "TIDL_DataConvertLayer": 1,
+      "TIDL_ConvolutionLayer": 84,
+      "TIDL_EltWiseLayer": 7,
+      "TIDL_ConcatLayer": 16,
+      "TIDL_PoolingLayer": 6,
+      "TIDL_ResizeLayer": 2,
+      "TIDL_DetectionOutputLayer": 1,
+      "TIDL_OdOutputReformatLayer": 2
+    },
+    "toplam_gmac": 4.4
+  }
+}
