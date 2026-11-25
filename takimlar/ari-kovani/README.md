@@ -116,7 +116,7 @@ Claude Code (Anthropic): kod yazımı, derleme ve eğitim betiklerinin hazırlan
 - **Takım:** Arı Kovanı
 - **Takım Kaptanı:** erkambbb
 - **Üyeler:** erkambbb, YusufMuharremDaskaya, 05Arda
-- **Danışman:** belirtilecek
+- **Danışman:** yok
 - **Lisans:** Bu repodaki çalışmalar referans repodaki lisans koşullarına tabidir; [LICENSE](LICENSE) dosyasına bakın.
 - **Üçüncü taraf model, veri seti ve kütüphaneler:**
   - YOLOX-lite COCO başlangıç ağırlıkları ve yapılandırmaları: TI edgeai-modelzoo / edgeai-mmdetection, BSD-3-Clause (YOLOX: Megvii, Apache-2.0; MMDetection: OpenMMLab, Apache-2.0).
